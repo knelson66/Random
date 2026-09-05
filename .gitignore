@@ -1,0 +1,24 @@
+# Report output
+reports/
+triage/
+*.csv
+*.html
+!docs/**/*.html
+
+# Secrets / credentials
+*.pfx
+*.p12
+*.pem
+*.key
+.env
+**/appsettings*.secrets.json
+credentials.json
+
+# PowerShell
+*.ps1xml.bak
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
