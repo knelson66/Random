@@ -106,9 +106,12 @@ function Export-SecurityReport {
         [Parameter(Mandatory)]
         [string]$OutputPath,
 
-        [ValidateSet('CSV', 'HTML', 'JSON', 'Excel', 'PDF', 'All')]
+        [ValidateSet('CSV', 'HTML', 'JSON', 'Excel', 'PDF', 'All', 'Polished')]
         [string]$Format = 'All'
     )
+    # 'Polished' = HTML + Excel + PDF only, no CSV/JSON. Handy for bridging findings already
+    # produced elsewhere (e.g. the Azure-Resources-CLI bash scripts) into the nicer formats
+    # without re-dumping raw data that already exists on disk.
 
     begin { $all = @() }
     process { $all += $Findings }
@@ -132,13 +135,13 @@ function Export-SecurityReport {
             Write-SecurityLog "JSON report written to $jsonPath" -Level SUCCESS
         }
 
-        if ($Format -in 'HTML', 'All') {
+        if ($Format -in 'HTML', 'All', 'Polished') {
             $htmlPath = "${base}_$stamp.html"
             New-SecurityReportHtml -Findings $sorted -Title $Title -Path $htmlPath
             Write-SecurityLog "HTML report written to $htmlPath" -Level SUCCESS
         }
 
-        if ($Format -in 'Excel', 'All') {
+        if ($Format -in 'Excel', 'All', 'Polished') {
             try {
                 if (Test-OptionalModule -Name ImportExcel) {
                     $xlsxPath = "${base}_$stamp.xlsx"
@@ -153,7 +156,7 @@ function Export-SecurityReport {
             }
         }
 
-        if ($Format -in 'PDF', 'All') {
+        if ($Format -in 'PDF', 'All', 'Polished') {
             try {
                 if (Test-OptionalModule -Name PSWriteOffice) {
                     $pdfPath = "${base}_$stamp.pdf"

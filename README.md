@@ -1,9 +1,10 @@
 # Azure & Microsoft 365 Security Engineering Toolkit
 
-A collection of PowerShell scripts for security engineers running **audits, vulnerability
-management, and day-to-day security maintenance** across **Azure** and the broader Microsoft
-ecosystem: Entra ID (Azure AD), Microsoft 365 (Exchange Online, SharePoint, Teams), on-prem
-Active Directory, and Microsoft Defender.
+A collection of PowerShell (and, for the Azure-resource checks, native Azure CLI/bash) scripts for
+security engineers running **audits, vulnerability management, and day-to-day security
+maintenance** across **Azure** and the broader Microsoft ecosystem: Entra ID (Azure AD),
+Microsoft 365 (Exchange Online, SharePoint, Teams), on-prem Active Directory, and Microsoft
+Defender.
 
 Every script is **read-only by default** (report/finding generation), with the exception of the
 one clearly-marked incident-response action script (device isolation), which requires explicit
@@ -19,6 +20,7 @@ this is defensive tooling for auditing your own (or an authorized client's) envi
 │
 ├── EntraID-AzureAD/                   # Identity: roles, MFA, guests, Conditional Access, apps
 ├── Azure-Resources/                   # NSGs, Storage, Key Vault, public IPs, RBAC, VM posture
+├── Azure-Resources-CLI/                # Same checks as Azure-Resources/, as az cli + bash + jq
 ├── VulnerabilityManagement/           # Defender TVM, software inventory, missing patches
 ├── ActiveDirectory/                   # Stale accounts, privileged groups, Kerberoast/AS-REP
 ├── Microsoft365/                      # Exchange Online, mailbox rules, SharePoint, Teams
@@ -46,6 +48,45 @@ this is defensive tooling for auditing your own (or an authorized client's) envi
 | `Audit-RBACAssignments.ps1` | Direct high-privilege grants at subscription scope, classic admins, wildcard custom roles |
 | `Audit-VMDiskEncryption.ps1` | Disk encryption, boot diagnostics, missing Defender/AMA extensions, VM Agent health |
 | `Get-DefenderForCloudSecureScore.ps1` | Pulls Secure Score and unhealthy recommendations, ranked for remediation |
+
+### Azure Resources via the Azure CLI (`Azure-Resources-CLI/`)
+
+A native `az` + `bash` + `jq` port of every script above, for anyone who prefers (or is
+standardized on) the Azure CLI over the Az PowerShell module — Azure Cloud Shell's bash mode,
+CI pipelines, WSL, etc. Same checks, same finding schema, same severities.
+
+| Script | PowerShell equivalent |
+|---|---|
+| `audit-network-security-groups.sh` | `Audit-NetworkSecurityGroups.ps1` |
+| `audit-storage-account-security.sh` | `Audit-StorageAccountSecurity.ps1` |
+| `audit-keyvault-security.sh` | `Audit-KeyVaultSecurity.ps1` |
+| `audit-public-ip-exposure.sh` | `Audit-PublicIPExposure.ps1` |
+| `audit-rbac-assignments.sh` | `Audit-RBACAssignments.ps1` |
+| `audit-vm-disk-encryption.sh` | `Audit-VMDiskEncryption.ps1` |
+| `get-defender-secure-score.sh` | `Get-DefenderForCloudSecureScore.ps1` (uses `az rest` against the Microsoft.Security API directly, so it doesn't depend on the `az security` extension) |
+| `connect-azure-cli.sh` | `Connect-SecurityToolkit.ps1` (runs `az login` if needed, lets you pick a subscription) |
+| `invoke-full-security-audit.sh` | `Invoke-FullSecurityAudit.ps1` (runs all of the above, merges findings) |
+
+**Requirements:** `az` (logged in via `az login`) and `jq`. Both ship by default in Azure Cloud
+Shell. Nothing else is required to get CSV + JSON output.
+
+**Getting HTML/Excel/PDF too, not just CSV/JSON:** bash has no native Excel/PDF writer, so these
+scripts lean on the same `modules/SecurityToolkitCommon` PowerShell module the `.ps1` scripts use.
+Every script writes CSV + JSON via pure `jq`, then — **only if `pwsh` is found on PATH** —
+automatically calls into `SecurityToolkitCommon` to upgrade that same data into HTML/Excel/PDF too
+(the `ImportExcel`/`PSWriteOffice` caveats from "Report output formats" above still apply). If
+`pwsh` isn't installed, you still get complete CSV/JSON, plus a log line telling you the exact
+command to run later once PowerShell 7 is available:
+
+```bash
+./connect-azure-cli.sh                              # az login + pick a subscription
+./audit-network-security-groups.sh -o ./reports      # CSV + JSON always; HTML/Excel/PDF if pwsh is present
+./invoke-full-security-audit.sh -o ./reports         # run all 7 + one consolidated report
+```
+
+Azure Cloud Shell conveniently has `pwsh` available too (switch modes with the dropdown, or run
+`pwsh` from bash) so the upgrade step works there out of the box once `Install-Module ImportExcel,
+PSWriteOffice -Scope CurrentUser` has been run once.
 
 ### Vulnerability Management (`VulnerabilityManagement/`)
 | Script | Purpose |
@@ -107,10 +148,15 @@ PowerShell 5.1 where the underlying module supports it.
 
 ### Running from Azure Cloud Shell / alongside the Azure CLI
 
-These scripts use the **Az PowerShell module** (`Connect-AzAccount`), Microsoft Graph PowerShell
-SDK, and the Exchange Online/SharePoint/Teams modules — they don't call the `az` CLI directly, so
-an `az login` alone will not authenticate them (Az PowerShell keeps a separate token cache from
-the Azure CLI). Two easy paths:
+If you'd rather stay entirely in the Azure CLI, use **`Azure-Resources-CLI/`** (see below) instead
+of the PowerShell scripts for the Azure-resource checks — it's a native `az`/`bash`/`jq` port that
+authenticates the same way you already do (`az login`), no separate PowerShell login required.
+
+The `.ps1` scripts, on the other hand, use the **Az PowerShell module** (`Connect-AzAccount`),
+Microsoft Graph PowerShell SDK, and the Exchange Online/SharePoint/Teams modules — they don't call
+the `az` CLI directly, so an `az login` alone will not authenticate them (Az PowerShell keeps a
+separate token cache from the Azure CLI). If you do want to run those (there's no CLI/bash port of
+the Entra ID/AD/M365/incident-response categories, only Azure-Resources), two easy paths:
 
 - **Azure Cloud Shell (PowerShell mode)** — the Az PowerShell module ships pre-installed and is
   already authenticated to your signed-in account for the session, so `Azure-Resources/`,
@@ -225,7 +271,12 @@ below where it applies.
 
 ## Contributing
 
-New scripts should follow the existing pattern: comment-based help (`SYNOPSIS`/`DESCRIPTION`/
-`PARAMETER`/`EXAMPLE`/`NOTES`), emit findings via `New-SecurityFinding`, export via
-`Export-SecurityReport`, and `return $findings` so the script composes with
+New PowerShell scripts should follow the existing pattern: comment-based help
+(`SYNOPSIS`/`DESCRIPTION`/`PARAMETER`/`EXAMPLE`/`NOTES`), emit findings via `New-SecurityFinding`,
+export via `Export-SecurityReport`, and `return $findings` so the script composes with
 `Invoke-FullSecurityAudit.ps1`.
+
+New `Azure-Resources-CLI/` scripts should `source lib/common.sh`, emit findings via `add_finding`
+(or a `jq` filter piped into `$FINDINGS_FILE` for bulk transforms), and end with `write_report
+"Title" "$OUTPUT_DIR"` so they pick up CSV/JSON output and the automatic HTML/Excel/PDF upgrade
+path. Run `shellcheck` on any new script before submitting it.
