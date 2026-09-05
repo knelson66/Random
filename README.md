@@ -24,7 +24,7 @@ this is defensive tooling for auditing your own (or an authorized client's) envi
 ├── Microsoft365/                      # Exchange Online, mailbox rules, SharePoint, Teams
 ├── IncidentResponse/                  # Forensic triage, suspicious sign-ins, device isolation
 ├── Compliance/                        # Azure Policy compliance, CIS-inspired Windows baseline
-└── reports/                           # Default output folder for CSV/HTML/JSON reports (gitignored)
+└── reports/                           # Default output folder for CSV/JSON/HTML/XLSX/PDF reports (gitignored)
 ```
 
 ### Entra ID / Azure AD (`EntraID-AzureAD/`)
@@ -96,10 +96,56 @@ Install-Module Microsoft.Online.SharePoint.PowerShell -Scope CurrentUser
 Install-Module MicrosoftTeams -Scope CurrentUser
 # For ActiveDirectory/*.ps1 scripts, install RSAT on Windows:
 Add-WindowsCapability -Online -Name Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0
+
+# Optional, for Excel (.xlsx) and PDF report output - see "Report output formats" below:
+Install-Module ImportExcel -Scope CurrentUser
+Install-Module PSWriteOffice -Scope CurrentUser
 ```
 
 PowerShell 7+ is recommended tenant-wide, but scripts are written to also run on Windows
 PowerShell 5.1 where the underlying module supports it.
+
+### Running from Azure Cloud Shell / alongside the Azure CLI
+
+These scripts use the **Az PowerShell module** (`Connect-AzAccount`), Microsoft Graph PowerShell
+SDK, and the Exchange Online/SharePoint/Teams modules — they don't call the `az` CLI directly, so
+an `az login` alone will not authenticate them (Az PowerShell keeps a separate token cache from
+the Azure CLI). Two easy paths:
+
+- **Azure Cloud Shell (PowerShell mode)** — the Az PowerShell module ships pre-installed and is
+  already authenticated to your signed-in account for the session, so `Azure-Resources/`,
+  `EntraID-AzureAD/`, and `Compliance/Audit-AzurePolicyCompliance.ps1` scripts work with no
+  `Connect-AzAccount` step. Just `Install-Module Microsoft.Graph, ImportExcel, PSWriteOffice
+  -Scope CurrentUser` once per Cloud Shell storage account for the rest.
+- **Local machine with the Azure CLI installed** — run `./Connect-SecurityToolkit.ps1` once per
+  session (see Quick start below); it calls `Connect-AzAccount`/`Connect-MgGraph` etc. for you.
+  You can keep using `az` for everything else — the two tools coexist fine side by side.
+
+## Report output formats
+
+Every script writes its findings via the shared `Export-SecurityReport` function
+(`modules/SecurityToolkitCommon`), which can produce five formats. `-Format All` (the default) is
+requested by every script and is layered so the formats with no extra dependencies always
+succeed:
+
+| Format | Dependency | Notes |
+|---|---|---|
+| CSV | None | Raw data, easiest to pull into another tool |
+| JSON | None | For feeding into a SIEM/ticketing pipeline |
+| HTML | None | Self-contained, color-coded by severity, opens in any browser |
+| **Excel (.xlsx)** | [`ImportExcel`](https://github.com/dfinke/ImportExcel) | `Findings` sheet (filterable table, frozen header, rows colored by severity), plus `Summary` and `ByCategory` roll-up sheets. No Microsoft Excel installation needed to generate it. |
+| **PDF** | [`PSWriteOffice`](https://github.com/EvotecIT/PSWriteOffice) | A portable, printable summary (severity counts + full findings table). Cross-platform (Windows/Linux/macOS), no Office install needed. If PSWriteOffice isn't installed, the toolkit automatically falls back to printing the HTML report to PDF with a headless Chromium-based browser (Edge/Chrome/Chromium) if one is found on PATH. |
+
+If neither the Excel nor PDF dependency (nor a fallback browser, for PDF) is available, that one
+format is skipped with a warning telling you what to install — the rest of the report still
+completes. To force a single format instead of the full set:
+
+```powershell
+./Azure-Resources/Audit-KeyVaultSecurity.ps1 -OutputPath ./reports
+# then, from the returned findings, generate just one extra format if you'd rather not re-run the audit:
+Import-Module ./modules/SecurityToolkitCommon/SecurityToolkitCommon.psd1
+$findings | Export-SecurityReport -Title 'KeyVault-Audit' -OutputPath ./reports -Format Excel
+```
 
 ## Quick start
 
@@ -116,7 +162,8 @@ PowerShell 5.1 where the underlying module supports it.
 
 Every audit script:
 - Emits standardized finding objects (`Category`, `Resource`, `Severity`, `Finding`, `Recommendation`)
-- Writes CSV, JSON, and a self-contained, color-coded HTML report to `-OutputPath` (default `./reports`)
+- Writes CSV, JSON, HTML, Excel, and PDF reports to `-OutputPath` (default `./reports`) — see
+  "Report output formats" below for the Excel/PDF dependencies
 - Prints a live summary table to the console as it runs
 - Can be run standalone or via `Invoke-FullSecurityAudit.ps1`
 
@@ -139,6 +186,42 @@ assess (internal security team, engaged pentest/audit, or your own tenant/lab). 
 and AS-REP Roasting scripts are read-only detection tools — they enumerate exposure without
 requesting any tickets — and the device isolation script requires interactive confirmation because
 it is disruptive to the target endpoint.
+
+## Related open-source security tools
+
+This toolkit is intentionally lightweight and focused on producing clean, portable reports. For
+deeper or more specialized coverage, these are established, widely-used open-source projects worth
+knowing about. **Several are dual-use (they can enumerate/attack as well as audit) and must only be
+run against a tenant/environment you own or are explicitly authorized to test** — that's called out
+below where it applies.
+
+**Curated lists** (good starting points for anything not covered here):
+- [merill/awesome-entra](https://github.com/merill/awesome-entra) — curated list of Microsoft Entra ID tools, docs, and scripts
+- [kmcquade/awesome-azure-security](https://github.com/kmcquade/awesome-azure-security) — curated list of Azure security tooling
+- [Kyuu-Ji/Awesome-Azure-Pentest](https://github.com/Kyuu-Ji/Awesome-Azure-Pentest) — Azure-focused pentest resource collection
+
+**Configuration/posture auditing** (closest in spirit to this repo — read-only, report-generating):
+- [nccgroup/ScoutSuite](https://github.com/nccgroup/ScoutSuite) — multi-cloud (incl. Azure) security auditing, generates an interactive HTML report
+- [CrowdStrike/CRT](https://github.com/CrowdStrike/CRT) — CrowdStrike Reporting Tool for Azure; reviews Entra ID role assignments and configuration weaknesses, HTML output
+- [prowler-cloud/prowler](https://github.com/prowler-cloud/prowler) — open-source CSPM covering AWS/Azure/GCP/K8s against CIS and other compliance frameworks
+- [PingCastle](https://github.com/vletoux/PingCastle) (now maintained by Netwrix) — on-prem AD risk assessment with a maturity-model score and polished HTML report; a good reference for report design
+- PowerShell Gallery `ORCA` (Office 365 Recommended Configuration Analyzer) — checks Defender for Office 365 configuration; note Microsoft has been folding this into the native Configuration Analyzer in the Defender portal, so check current maintenance status before relying on it
+
+**Incident response / threat hunting for Entra ID & Microsoft 365** (complements `IncidentResponse/`):
+- [T0pCat/Hawk](https://github.com/T0pCat/Hawk) — actively maintained M365/Entra ID incident response data-gathering module (successor in spirit to CISA's Sparrow)
+- [cisagov/Sparrow](https://github.com/cisagov/Sparrow) — CISA's original M365/Azure AD post-compromise detection tool (archived, but a solid reference for what to check after a suspected breach)
+
+**Attack-path / identity graphing** (run defensively against your own tenant to see what an attacker's recon would surface — requires authorization):
+- [SpecterOps/BloodHound](https://github.com/SpecterOps/BloodHound) + [BloodHoundAD/AzureHound](https://github.com/BloodHoundAD/AzureHound) — attack-path graphing for on-prem AD and Entra ID
+- [dirkjanm/ROADtools](https://github.com/dirkjanm/ROADtools) — Entra ID enumeration/analysis framework (ROADrecon)
+- [Azure/Stormspotter](https://github.com/Azure/Stormspotter) — Azure resource/Entra ID attack-surface graphing, originally a Microsoft red-team tool
+- [hausec/PowerZure](https://github.com/hausec/PowerZure) and [Gerenios/AADInternals](https://github.com/Gerenios/AADInternals) — deep Azure/Entra ID recon, privilege-escalation identification, and (for AADInternals) low-level admin/testing functions not exposed elsewhere. Powerful and genuinely dual-use — treat as red-team/pentest tooling, not something to run casually against production.
+- [dafthack/MFASweep](https://github.com/dafthack/MFASweep) — checks whether MFA is actually enforced across individual M365 protocols/services; performs live sign-in attempts, so only run it with explicit authorization and test credentials
+
+**Reporting libraries this toolkit builds on directly:**
+- [dfinke/ImportExcel](https://github.com/dfinke/ImportExcel) — Excel file generation/formatting without installing Microsoft Excel
+- [EvotecIT/PSWriteOffice](https://github.com/EvotecIT/PSWriteOffice) — cross-platform Word/Excel/PDF document automation (successor to the now-archived `PSWritePDF`)
+- [EvotecIT/PSWriteHTML](https://github.com/EvotecIT/PSWriteHTML) — an option if you outgrow this repo's built-in HTML report and want interactive dashboards (sortable/searchable tables, charts) instead
 
 ## Contributing
 

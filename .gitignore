@@ -3,6 +3,8 @@ reports/
 triage/
 *.csv
 *.html
+*.xlsx
+*.pdf
 !docs/**/*.html
 
 # Secrets / credentials
